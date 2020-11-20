@@ -10,6 +10,7 @@ disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
 
 import datetime
 import os
+from enum import Enum, unique, auto
 import tempfile
 import subprocess
 
@@ -19,9 +20,38 @@ import utils
 from inputs import Argument
 from errors import OpenCEError, Error
 
+utils.check_if_conda_build_exists()
+
+import conda_build.metadata # pylint: disable=wrong-import-position, wrong-import-order
+
 COMMAND = 'feedstock'
 DESCRIPTION = 'Test a feedstock as part of Open-CE'
 ARGUMENTS = [Argument.CONDA_ENV_FILE, Argument.TEST_WORKING_DIRECTORY]
+
+@unique
+class Key(Enum):
+    '''Enum for Test File Keys'''
+    tests = auto()
+    name = auto()
+    command = auto()
+
+_TEST_SCHEMA ={
+    Key.name.name: utils.make_schema_type(str, True),
+    Key.command.name: utils.make_schema_type(str, True)
+}
+
+_TEST_FILE_SCHEMA = {
+    Key.tests.name: utils.make_schema_type([_TEST_SCHEMA])
+}
+
+def _validate_test_file(test_file, variants):
+    '''Perform some validation on the environment file after loading it.'''
+    try:
+        tests = conda_build.metadata.MetaData(test_file, variant=variants).get_rendered_recipe_text(permit_undefined_jinja=True)
+        utils.validate_dict_schema(tests, _TEST_FILE_SCHEMA)
+        return tests
+    except (Exception, SystemExit) as exc: #pylint: disable=broad-except
+        raise OpenCEError(Error.ERROR, "Error in {}:\n  {}".format(test_file, str(exc))) from exc
 
 class TestCommand():
     """
@@ -143,8 +173,7 @@ def load_test_file(test_file):
     if not os.path.exists(test_file):
         return None
 
-    with open(test_file, 'r') as stream:
-        test_file_data = yaml.safe_load(stream)
+    test_file_data = _validate_test_file(test_file, utils.make_variants()[0])
 
     return test_file_data
 
